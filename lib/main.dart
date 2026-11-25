@@ -1,7 +1,16 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  await Supabase.initialize(
+    url: 'https://wofalpepdexhfzklqmdi.supabase.co',
+    anonKey: 'sb_publishable_MDEwz1xdXjhx6Jr_Pu9s-Q_QrozJQF0',
+  );
+
   runApp(const ParleyApp());
 }
 
@@ -31,6 +40,8 @@ class _ParleyAppState extends State {
     const Color darkPaper = Color(0xFF2A2422);
     const Color lightInk = Color(0xFFE0D8D0);
     const Color lightGreen = Color(0xFF4A8B76);
+
+    final session = Supabase.instance.client.auth.currentSession;
 
     return MaterialApp(
       title: 'Parley',
@@ -95,7 +106,15 @@ class _ParleyAppState extends State {
           ),
         ),
       ),
-      home: WelcomeScreen(isDarkMode: _isDarkMode, onToggleTheme: _toggleTheme),
+      home: session != null
+          ? OnboardingScreen(
+              isDarkMode: _isDarkMode,
+              onToggleTheme: _toggleTheme,
+            )
+          : WelcomeScreen(
+              isDarkMode: _isDarkMode,
+              onToggleTheme: _toggleTheme,
+            ),
       builder: (context, child) => GestureDetector(
         behavior: HitTestBehavior.translucent,
         onTap: () => FocusManager.instance.primaryFocus?.unfocus(),
@@ -180,7 +199,7 @@ class Partner {
 // ---------------------------------------------------------
 // WELCOME SCREEN
 // ---------------------------------------------------------
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends StatefulWidget {
   final bool isDarkMode;
   final VoidCallback onToggleTheme;
 
@@ -189,6 +208,55 @@ class WelcomeScreen extends StatelessWidget {
     required this.isDarkMode,
     required this.onToggleTheme,
   });
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  bool _isSigningInWithGoogle = false;
+
+  @override
+  void initState() {
+    super.initState();
+    Supabase.instance.client.auth.onAuthStateChange.listen((data) {
+      if (data.event == AuthChangeEvent.signedIn && mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => OnboardingScreen(
+              isDarkMode: widget.isDarkMode,
+              onToggleTheme: widget.onToggleTheme,
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  Future<void> _signInWithGoogle() async {
+    if (_isSigningInWithGoogle) return;
+    setState(() => _isSigningInWithGoogle = true);
+
+    try {
+      await Supabase.instance.client.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: kIsWeb
+            ? 'https://anscripta-wq.github.io/Parley/'
+            : null,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Google sign-in failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSigningInWithGoogle = false);
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -229,19 +297,19 @@ class WelcomeScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 50),
                 ElevatedButton.icon(
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => OnboardingScreen(
-                          isDarkMode: isDarkMode,
-                          onToggleTheme: onToggleTheme,
-                        ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.g_mobiledata, size: 30),
-                  label: const Text('Continue with Google'),
+                  onPressed: _isSigningInWithGoogle ? null : _signInWithGoogle,
+                  icon: _isSigningInWithGoogle
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.g_mobiledata, size: 30),
+                  label: Text(
+                    _isSigningInWithGoogle
+                        ? 'Connecting to Google...'
+                        : 'Continue with Google',
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Theme.of(context).cardColor,
                     foregroundColor: Theme.of(
@@ -258,8 +326,8 @@ class WelcomeScreen extends StatelessWidget {
                       context,
                       MaterialPageRoute(
                         builder: (context) => OnboardingScreen(
-                          isDarkMode: isDarkMode,
-                          onToggleTheme: onToggleTheme,
+                          isDarkMode: widget.isDarkMode,
+                          onToggleTheme: widget.onToggleTheme,
                         ),
                       ),
                     );
@@ -388,6 +456,28 @@ class _OnboardingScreenState extends State {
     'admin',
     'parley',
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user != null) {
+      final metadata = user.userMetadata;
+      if (metadata != null && metadata['avatar_url'] != null) {
+        _pickedImageUrl = metadata['avatar_url'] as String;
+      }
+      if (user.email != null && _handleController.text.isEmpty) {
+        final suggested = user.email!
+            .split('@')
+            .first
+            .replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')
+            .toLowerCase();
+        if (!_takenUsernames.contains(suggested)) {
+          _handleController.text = suggested;
+        }
+      }
+    }
+  }
 
   void _pickImage() {
     setState(() {
@@ -2565,7 +2655,9 @@ class _UserProfileScreenState extends State {
                 width: double.infinity,
                 height: 50,
                 child: OutlinedButton(
-                  onPressed: () {
+                  onPressed: () async {
+                    await Supabase.instance.client.auth.signOut();
+                    if (!context.mounted) return;
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(
