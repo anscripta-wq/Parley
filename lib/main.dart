@@ -337,6 +337,7 @@ class _MainScreenState extends State {
     required String nativeLang,
     required String learningLang,
     required String bio,
+    String? avatarUrl,
   }) async {
     final clean = handle.trim().toLowerCase().replaceFirst('@', '');
     final formatted = '@$clean';
@@ -346,6 +347,7 @@ class _MainScreenState extends State {
       'native_lang': nativeLang,
       'learning_lang': learningLang,
       'bio': bio,
+      'avatar_url': avatarUrl ?? _profile.avatarUrl,
     }).eq('id', _profile.id);
 
     if (mounted) {
@@ -356,7 +358,7 @@ class _MainScreenState extends State {
           nativeLang: nativeLang,
           learningLang: learningLang,
           bio: bio,
-          avatarUrl: _profile.avatarUrl,
+          avatarUrl: avatarUrl ?? _profile.avatarUrl,
           streakCount: _profile.streakCount,
         );
       });

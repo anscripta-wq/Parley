@@ -1,7 +1,11 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:record/record.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
@@ -102,9 +106,10 @@ class _MessagesScreenState extends State {
       for (final entry in latestByPartner.entries) {
         final partner = profilesMap[entry.key];
         if (partner != null) {
+          final isVoice = (entry.value['is_voice_note'] as bool?) ?? false;
           built.add({
             'partner': partner,
-            'lastMessage': (entry.value['text'] ?? '').toString(),
+            'lastMessage': isVoice ? 'Voice Note' : (entry.value['text'] ?? '').toString(),
           });
         }
       }
@@ -223,10 +228,16 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final AudioRecorder _audioRecorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+
   List _messages = [];
   final Map _translations = {};
   final Set _translatingIds = {};
   bool _isLoading = true;
+  bool _isRecording = false;
+  bool _isUploadingVoice = false;
+  String? _playingMessageId;
   RealtimeChannel? _chatChannel;
 
   @override
@@ -234,6 +245,11 @@ class _ChatScreenState extends State {
     super.initState();
     _loadMessages();
     _subscribeToChat();
+    _audioPlayer.onPlayerComplete.listen((_) {
+      if (mounted) {
+        setState(() => _playingMessageId = null);
+      }
+    });
   }
 
   @override
@@ -241,6 +257,8 @@ class _ChatScreenState extends State {
     if (_chatChannel != null) {
       supabase.removeChannel(_chatChannel!);
     }
+    _audioRecorder.dispose();
+    _audioPlayer.dispose();
     _controller.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -332,6 +350,119 @@ class _ChatScreenState extends State {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to send message: $e')),
+        );
+      }
+    }
+  }
+
+  Future _toggleVoiceRecording() async {
+    final w = widget as ChatScreen;
+    if (_isUploadingVoice) return;
+
+    if (!_isRecording) {
+      try {
+        final hasPermission = await _audioRecorder.hasPermission();
+        if (!hasPermission) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Please allow microphone access in your browser/phone settings.')),
+            );
+          }
+          return;
+        }
+
+        final encoder = kIsWeb ? AudioEncoder.opus : AudioEncoder.aacLc;
+        final ext = kIsWeb ? 'webm' : 'm4a';
+        final tempPath = kIsWeb ? '' : '/tmp/parley_voice_${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+        await _audioRecorder.start(
+          RecordConfig(encoder: encoder),
+          path: tempPath,
+        );
+        HapticFeedback.mediumImpact();
+        if (mounted) setState(() => _isRecording = true);
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not start microphone: $e')),
+          );
+        }
+      }
+      return;
+    }
+
+    // Stop recording and upload
+    setState(() {
+      _isRecording = false;
+      _isUploadingVoice = true;
+    });
+
+    try {
+      final recordedPath = await _audioRecorder.stop();
+      if (recordedPath == null || recordedPath.isEmpty) {
+        if (mounted) setState(() => _isUploadingVoice = false);
+        return;
+      }
+
+      Uint8List bytes;
+      if (kIsWeb) {
+        final resp = await http.get(Uri.parse(recordedPath));
+        bytes = resp.bodyBytes;
+      } else {
+        final resp = await http.get(Uri.file(recordedPath));
+        bytes = resp.bodyBytes;
+      }
+
+      final ext = kIsWeb ? 'webm' : 'm4a';
+      final contentType = kIsWeb ? 'audio/webm' : 'audio/mp4';
+      final fileName = '${w.currentProfile.id}/${DateTime.now().millisecondsSinceEpoch}.$ext';
+
+      await supabase.storage.from('voice-notes').uploadBinary(
+        fileName,
+        bytes,
+        fileOptions: FileOptions(contentType: contentType, upsert: true),
+      );
+
+      final publicUrl = supabase.storage.from('voice-notes').getPublicUrl(fileName);
+
+      await supabase.from('messages').insert({
+        'sender_id': w.currentProfile.id,
+        'receiver_id': w.partner.id,
+        'text': 'Voice Note',
+        'is_voice_note': true,
+        'audio_url': publicUrl,
+      });
+
+      await _loadMessages();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Voice note upload failed: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingVoice = false);
+    }
+  }
+
+  Future _togglePlayVoice(ChatMessage msg) async {
+    if (msg.audioUrl == null || msg.audioUrl!.isEmpty) return;
+
+    if (_playingMessageId == msg.id) {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _playingMessageId = null);
+      return;
+    }
+
+    try {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _playingMessageId = msg.id);
+      await _audioPlayer.play(UrlSource(msg.audioUrl!));
+    } catch (e) {
+      if (mounted) {
+        setState(() => _playingMessageId = null);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not play audio: $e')),
         );
       }
     }
@@ -462,6 +593,7 @@ class _ChatScreenState extends State {
                       final isMe = msg.senderId == w.currentProfile.id;
                       final translated = _translations[msg.id];
                       final isTranslating = _translatingIds.contains(msg.id);
+                      final isPlaying = _playingMessageId == msg.id;
 
                       return Align(
                         alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -476,60 +608,82 @@ class _ChatScreenState extends State {
                               bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                msg.text,
-                                style: TextStyle(
-                                  color: isMe ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              if (translated != null) ...[
-                                const Divider(height: 10),
-                                Text(
-                                  translated.toString(),
-                                  style: TextStyle(
-                                    fontSize: 13,
-                                    fontStyle: FontStyle.italic,
-                                    color: isMe ? Colors.white70 : Theme.of(context).colorScheme.primary,
-                                  ),
-                                ),
-                              ],
-                              const SizedBox(height: 4),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: isTranslating
-                                    ? const SizedBox(
-                                        width: 12,
-                                        height: 12,
-                                        child: CircularProgressIndicator(strokeWidth: 1.5),
-                                      )
-                                    : InkWell(
-                                        onTap: () => _toggleTranslate(msg),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Icon(
-                                              Icons.translate,
-                                              size: 14,
-                                              color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
-                                            ),
-                                            const SizedBox(width: 4),
-                                            Text(
-                                              translated != null ? 'Hide' : 'Translate',
-                                              style: TextStyle(
-                                                fontSize: 10,
-                                                color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
-                                              ),
-                                            ),
-                                          ],
+                          child: msg.isVoiceNote
+                              ? InkWell(
+                                  onTap: () => _togglePlayVoice(msg),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        isPlaying ? Icons.stop_circle : Icons.play_circle_fill,
+                                        color: isMe ? Colors.white : Theme.of(context).colorScheme.primary,
+                                        size: 28,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        isPlaying ? 'Playing Voice Note...' : 'Voice Note',
+                                        style: TextStyle(
+                                          color: isMe ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,
+                                          fontWeight: FontWeight.bold,
                                         ),
                                       ),
-                              ),
-                            ],
-                          ),
+                                    ],
+                                  ),
+                                )
+                              : Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      msg.text,
+                                      style: TextStyle(
+                                        color: isMe ? Colors.white : Theme.of(context).textTheme.bodyLarge?.color,
+                                        fontSize: 15,
+                                      ),
+                                    ),
+                                    if (translated != null) ...[
+                                      const Divider(height: 10),
+                                      Text(
+                                        translated.toString(),
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          fontStyle: FontStyle.italic,
+                                          color: isMe ? Colors.white70 : Theme.of(context).colorScheme.primary,
+                                        ),
+                                      ),
+                                    ],
+                                    const SizedBox(height: 4),
+                                    Align(
+                                      alignment: Alignment.centerRight,
+                                      child: isTranslating
+                                          ? const SizedBox(
+                                              width: 12,
+                                              height: 12,
+                                              child: CircularProgressIndicator(strokeWidth: 1.5),
+                                            )
+                                          : InkWell(
+                                              onTap: () => _toggleTranslate(msg),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.translate,
+                                                    size: 14,
+                                                    color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    translated != null ? 'Hide' : 'Translate',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                    ),
+                                  ],
+                                ),
                         ),
                       );
                     },
@@ -539,12 +693,26 @@ class _ChatScreenState extends State {
             padding: const EdgeInsets.all(12.0),
             child: Row(
               children: [
+                CircleAvatar(
+                  backgroundColor: _isRecording ? Colors.red : Theme.of(context).cardColor,
+                  child: _isUploadingVoice
+                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                      : IconButton(
+                          icon: Icon(
+                            _isRecording ? Icons.stop : Icons.mic,
+                            color: _isRecording ? Colors.white : Theme.of(context).colorScheme.primary,
+                            size: 20,
+                          ),
+                          onPressed: _toggleVoiceRecording,
+                        ),
+                ),
+                const SizedBox(width: 8),
                 Expanded(
                   child: TextField(
                     controller: _controller,
                     onSubmitted: (_) => _sendMessage(),
                     decoration: InputDecoration(
-                      hintText: 'Write a message...',
+                      hintText: _isRecording ? 'Recording voice note... tap stop to send' : 'Write a message...',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(30),
                         borderSide: BorderSide.none,

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
@@ -11,6 +12,7 @@ class UserProfileScreen extends StatefulWidget {
     required String nativeLang,
     required String learningLang,
     required String bio,
+    String? avatarUrl,
   }) onUpdateProfile;
   final bool isDarkMode;
   final VoidCallback onToggleTheme;
@@ -30,6 +32,60 @@ class UserProfileScreen extends StatefulWidget {
 }
 
 class _UserProfileScreenState extends State {
+  bool _isUploadingAvatar = false;
+
+  Future _pickAndUploadAvatar() async {
+    final w = widget as UserProfileScreen;
+    if (_isUploadingAvatar) return;
+
+    try {
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 80,
+      );
+      if (picked == null) return;
+
+      setState(() => _isUploadingAvatar = true);
+      final bytes = await picked.readAsBytes();
+      final ext = picked.name.split('.').last.toLowerCase();
+      final safeExt = (ext == 'png' || ext == 'webp') ? ext : 'jpg';
+      final fileName = '${w.profile.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$safeExt';
+
+      await supabase.storage.from('avatars').uploadBinary(
+        fileName,
+        bytes,
+        fileOptions: FileOptions(contentType: 'image/$safeExt', upsert: true),
+      );
+
+      final publicUrl = supabase.storage.from('avatars').getPublicUrl(fileName);
+
+      await w.onUpdateProfile(
+        handle: w.profile.handle.replaceFirst('@', ''),
+        nativeLang: w.profile.nativeLang,
+        learningLang: w.profile.learningLang,
+        bio: w.profile.bio,
+        avatarUrl: publicUrl,
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile photo updated!')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not upload photo: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingAvatar = false);
+    }
+  }
+
   Future _showEditProfileDialog() async {
     final w = widget as UserProfileScreen;
     final handleCtrl = TextEditingController(text: w.profile.handle.replaceFirst('@', ''));
@@ -98,6 +154,7 @@ class _UserProfileScreenState extends State {
                     nativeLang: native,
                     learningLang: learning,
                     bio: bioCtrl.text.trim(),
+                    avatarUrl: w.profile.avatarUrl,
                   );
                   if (dialogContext.mounted) Navigator.pop(dialogContext);
                 } on PostgrestException catch (e) {
@@ -164,7 +221,27 @@ class _UserProfileScreenState extends State {
         child: Column(
           children: [
             const SizedBox(height: 28),
-            ParleyAvatar(profile: w.profile, radius: 48),
+            Stack(
+              alignment: Alignment.bottomRight,
+              children: [
+                InkWell(
+                  onTap: _pickAndUploadAvatar,
+                  borderRadius: BorderRadius.circular(50),
+                  child: _isUploadingAvatar
+                      ? const CircleAvatar(radius: 48, child: CircularProgressIndicator())
+                      : ParleyAvatar(profile: w.profile, radius: 48),
+                ),
+                CircleAvatar(
+                  radius: 16,
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  child: IconButton(
+                    padding: EdgeInsets.zero,
+                    icon: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
+                    onPressed: _pickAndUploadAvatar,
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 14),
             Text(w.profile.handle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
