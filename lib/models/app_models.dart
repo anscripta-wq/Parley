@@ -89,6 +89,50 @@ class PostItem {
   }
 }
 
+class CommentItem {
+  final String id;
+  final String postId;
+  final String userId;
+  final String authorHandle;
+  final String content;
+  final DateTime createdAt;
+
+  CommentItem({
+    required this.id,
+    required this.postId,
+    required this.userId,
+    required this.authorHandle,
+    required this.content,
+    required this.createdAt,
+  });
+
+  factory CommentItem.fromMap(Map map) {
+    final rawHandle = (map['author_handle'] ?? '@reader').toString().trim();
+    final formattedHandle = rawHandle.startsWith('@') ? rawHandle : '@$rawHandle';
+    return CommentItem(
+      id: map['id'].toString(),
+      postId: (map['post_id'] ?? '').toString(),
+      userId: (map['user_id'] ?? '').toString(),
+      authorHandle: formattedHandle,
+      content: (map['content'] ?? '').toString(),
+      createdAt: DateTime.tryParse((map['created_at'] ?? '').toString())?.toLocal() ?? DateTime.now(),
+    );
+  }
+
+  String get initial {
+    final clean = authorHandle.replaceFirst('@', '').trim();
+    return clean.isEmpty ? 'P' : clean.substring(0, 1).toUpperCase();
+  }
+
+  String get timeAgo {
+    final diff = DateTime.now().difference(createdAt);
+    if (diff.inMinutes == 0) return 'Just now';
+    if (diff.inMinutes <= 59) return '${diff.inMinutes}m ago';
+    if (diff.inHours <= 23) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
+  }
+}
+
 class ChatMessage {
   final String id;
   final String senderId;
@@ -119,6 +163,30 @@ class ChatMessage {
       createdAt: DateTime.tryParse((map['created_at'] ?? '').toString())?.toLocal() ?? DateTime.now(),
     );
   }
+}
+
+String languageToIsoCode(String lang) {
+  const map = {
+    'Afrikaans': 'af', 'Albanian': 'sq', 'Amharic': 'am', 'Arabic': 'ar',
+    'Armenian': 'hy', 'Azerbaijani': 'az', 'Bengali': 'bn', 'Bulgarian': 'bg',
+    'Burmese': 'my', 'Catalan': 'ca', 'Chinese (Mandarin)': 'zh-CN',
+    'Croatian': 'hr', 'Czech': 'cs', 'Danish': 'da', 'Dutch': 'nl',
+    'English': 'en', 'Estonian': 'et', 'Filipino': 'tl', 'Finnish': 'fi',
+    'French': 'fr', 'Georgian': 'ka', 'German': 'de', 'Greek': 'el',
+    'Gujarati': 'gu', 'Hebrew': 'iw', 'Hindi': 'hi', 'Hungarian': 'hu',
+    'Icelandic': 'is', 'Indonesian': 'id', 'Irish': 'ga', 'Italian': 'it',
+    'Japanese': 'ja', 'Kannada': 'kn', 'Kazakh': 'kk', 'Khmer': 'km',
+    'Korean': 'ko', 'Lao': 'lo', 'Latvian': 'lv', 'Lithuanian': 'lt',
+    'Macedonian': 'mk', 'Malay': 'ms', 'Malayalam': 'ml', 'Maltese': 'mt',
+    'Marathi': 'mr', 'Mongolian': 'mn', 'Nepali': 'ne', 'Norwegian': 'no',
+    'Persian': 'fa', 'Polish': 'pl', 'Portuguese': 'pt', 'Punjabi': 'pa',
+    'Romanian': 'ro', 'Russian': 'ru', 'Serbian': 'sr', 'Sinhala': 'si',
+    'Slovak': 'sk', 'Slovenian': 'sl', 'Somali': 'so', 'Spanish': 'es',
+    'Swahili': 'sw', 'Swedish': 'sv', 'Tamil': 'ta', 'Telugu': 'te',
+    'Thai': 'th', 'Turkish': 'tr', 'Ukrainian': 'uk', 'Urdu': 'ur',
+    'Uzbek': 'uz', 'Vietnamese': 'vi', 'Welsh': 'cy', 'Zulu': 'zu',
+  };
+  return map[lang] ?? 'en';
 }
 
 const List kSupportedLanguages = [

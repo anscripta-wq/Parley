@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
@@ -46,6 +48,10 @@ class _MessagesScreenState extends State {
       callback: (payload) {
         final record = payload.newRecord;
         if (record['sender_id'] == myId || record['receiver_id'] == myId) {
+          if (record['receiver_id'] == myId) {
+            SystemSound.play(SystemSoundType.alert);
+            HapticFeedback.mediumImpact();
+          }
           _loadConversations();
         }
       },
@@ -219,6 +225,7 @@ class _ChatScreenState extends State {
   final ScrollController _scrollController = ScrollController();
   List _messages = [];
   final Map _translations = {};
+  final Set _translatingIds = {};
   bool _isLoading = true;
   RealtimeChannel? _chatChannel;
 
@@ -255,6 +262,10 @@ class _ChatScreenState extends State {
         if (isRelevant && mounted) {
           final incoming = ChatMessage.fromMap(r);
           if (!_messages.any((m) => (m as ChatMessage).id == incoming.id)) {
+            if (incoming.senderId == otherId) {
+              SystemSound.play(SystemSoundType.click);
+              HapticFeedback.lightImpact();
+            }
             setState(() => _messages.add(incoming));
             _scrollToBottom();
           }
@@ -326,16 +337,52 @@ class _ChatScreenState extends State {
     }
   }
 
-  void _toggleTranslate(ChatMessage msg) {
+  Future _toggleTranslate(ChatMessage msg) async {
+    if (_translations.containsKey(msg.id)) {
+      setState(() => _translations.remove(msg.id));
+      return;
+    }
+    if (_translatingIds.contains(msg.id)) return;
+
     final w = widget as ChatScreen;
-    setState(() {
-      if (_translations.containsKey(msg.id)) {
-        _translations.remove(msg.id);
-      } else {
-        _translations[msg.id] =
-            '[${w.currentProfile.nativeLang} Translation]: ${msg.text}';
+    final isMine = msg.senderId == w.currentProfile.id;
+    final targetLangName = isMine ? w.partner.nativeLang : w.currentProfile.nativeLang;
+    final targetCode = languageToIsoCode(targetLangName);
+
+    setState(() => _translatingIds.add(msg.id));
+
+    try {
+      final uri = Uri.https('translate.googleapis.com', '/translate_a/single', {
+        'client': 'gtx',
+        'sl': 'auto',
+        'tl': targetCode,
+        'dt': 't',
+        'q': msg.text,
+      });
+      final response = await http.get(uri);
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as List;
+        final segments = decoded[0] as List;
+        final buffer = StringBuffer();
+        for (final seg in segments) {
+          buffer.write((seg as List)[0].toString());
+        }
+        if (mounted) {
+          setState(() {
+            _translations[msg.id] = '$targetLangName: ${buffer.toString()}';
+            _translatingIds.remove(msg.id);
+          });
+        }
+        return;
       }
-    });
+    } catch (_) {}
+
+    if (mounted) {
+      setState(() {
+        _translations[msg.id] = 'Could not reach translation service right now.';
+        _translatingIds.remove(msg.id);
+      });
+    }
   }
 
   @override
@@ -414,6 +461,7 @@ class _ChatScreenState extends State {
                       final msg = _messages[index] as ChatMessage;
                       final isMe = msg.senderId == w.currentProfile.id;
                       final translated = _translations[msg.id];
+                      final isTranslating = _translatingIds.contains(msg.id);
 
                       return Align(
                         alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -452,14 +500,33 @@ class _ChatScreenState extends State {
                               const SizedBox(height: 4),
                               Align(
                                 alignment: Alignment.centerRight,
-                                child: InkWell(
-                                  onTap: () => _toggleTranslate(msg),
-                                  child: Icon(
-                                    Icons.translate,
-                                    size: 14,
-                                    color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
-                                  ),
-                                ),
+                                child: isTranslating
+                                    ? const SizedBox(
+                                        width: 12,
+                                        height: 12,
+                                        child: CircularProgressIndicator(strokeWidth: 1.5),
+                                      )
+                                    : InkWell(
+                                        onTap: () => _toggleTranslate(msg),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(
+                                              Icons.translate,
+                                              size: 14,
+                                              color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              translated != null ? 'Hide' : 'Translate',
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                color: isMe ? Colors.white70 : Theme.of(context).disabledColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                               ),
                             ],
                           ),

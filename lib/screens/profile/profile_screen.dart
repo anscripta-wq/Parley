@@ -114,6 +114,41 @@ class _UserProfileScreenState extends State {
     );
   }
 
+  void _openSavedReadings() {
+    final w = widget as UserProfileScreen;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).cardColor,
+      builder: (context) => Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Saved Readings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            Expanded(
+              child: w.savedPosts.isEmpty
+                  ? const Center(child: Text('No bookmarked posts yet. Tap the bookmark icon on any post!'))
+                  : ListView.builder(
+                      itemCount: w.savedPosts.length,
+                      itemBuilder: (context, index) {
+                        final p = w.savedPosts[index] as PostItem;
+                        return Card(
+                          margin: const EdgeInsets.only(bottom: 10),
+                          child: ListTile(
+                            title: Text(p.authorHandle, style: const TextStyle(fontWeight: FontWeight.bold)),
+                            subtitle: Text(p.content, maxLines: 3, overflow: TextOverflow.ellipsis),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final w = widget as UserProfileScreen;
@@ -173,7 +208,13 @@ class _UserProfileScreenState extends State {
                 ),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Icon(Icons.bookmarks_outlined, color: Theme.of(context).colorScheme.primary),
+              title: const Text('Saved Readings'),
+              trailing: Text('${w.savedPosts.length} saved', style: TextStyle(color: Theme.of(context).disabledColor)),
+              onTap: _openSavedReadings,
+            ),
             ListTile(
               leading: Icon(Icons.dark_mode, color: Theme.of(context).colorScheme.secondary),
               title: const Text('Night Reading Mode'),
