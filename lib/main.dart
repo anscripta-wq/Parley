@@ -371,7 +371,7 @@ class _MainScreenState extends State {
     final screens = [
       MessagesScreen(currentProfile: _profile),
       PartnersScreen(currentProfile: _profile),
-      const PracticeScreen(),
+      PracticeScreen(currentProfile: _profile),
       PostsScreen(
         currentProfile: _profile,
         posts: _posts,
