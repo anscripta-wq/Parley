@@ -233,44 +233,54 @@ class _MainScreenState extends State {
   Future _loadPosts() async {
     try {
       final rows = await supabase.from('posts').select().order('created_at', ascending: false);
+      final parsedPosts = (rows as List).map((row) => PostItem.fromMap(Map<String, dynamic>.from(row as Map))).toList();
+
+      if (mounted) {
+        setState(() {
+          _posts = parsedPosts;
+          _isLoadingPosts = false;
+        });
+      }
+
+      final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+      final hasValidId = uuidRegex.hasMatch(_profile.id.trim());
       List blockRows = [];
       List likeRows = [];
       List saveRows = [];
       List commentRows = [];
-      final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
-      final hasValidId = uuidRegex.hasMatch(_profile.id.trim());
       if (hasValidId) {
         try { blockRows = await supabase.from('blocked_users').select('blocked_id').eq('blocker_id', _profile.id); } catch (_) {}
         try { likeRows = await supabase.from('post_likes').select('post_id').eq('user_id', _profile.id); } catch (_) {}
         try { saveRows = await supabase.from('saved_posts').select('post_id').eq('user_id', _profile.id); } catch (_) {}
       }
       try { commentRows = await supabase.from('post_comments').select('post_id'); } catch (_) {}
-      final blockedIds = blockRows.map((r) => (r as Map)['blocked_id'].toString()).toSet();
 
-      final likedIds = (likeRows as List).map((r) => (r as Map)['post_id'].toString()).toSet();
-      final savedIds = (saveRows as List).map((r) => (r as Map)['post_id'].toString()).toSet();
-      final commentCounts = {};
-      for (final r in (commentRows as List)) {
+      final blockedIds = blockRows.map((r) => (r as Map)['blocked_id'].toString()).toSet();
+      final likedIds = likeRows.map((r) => (r as Map)['post_id'].toString()).toSet();
+      final savedIds = saveRows.map((r) => (r as Map)['post_id'].toString()).toSet();
+      final Map<String, int> commentCounts = {};
+      for (final r in commentRows) {
         final pid = (r as Map)['post_id'].toString();
         commentCounts[pid] = (commentCounts[pid] ?? 0) + 1;
       }
 
       if (mounted) {
         setState(() {
-          _posts = (rows as List)
-              .where((row) => !blockedIds.contains((row as Map)['user_id'].toString()))
-              .map((row) {
-                final item = PostItem.fromMap(row as Map);
-                item.isLiked = likedIds.contains(item.id);
-                item.isSaved = savedIds.contains(item.id);
-                item.commentsCount = (commentCounts[item.id] as int?) ?? 0;
-                return item;
-              }).toList();
-          _isLoadingPosts = false;
+          _posts = parsedPosts.where((item) => !blockedIds.contains(item.userId)).map((item) {
+            item.isLiked = likedIds.contains(item.id);
+            item.isSaved = savedIds.contains(item.id);
+            item.commentsCount = commentCounts[item.id] ?? 0;
+            return item;
+          }).toList();
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoadingPosts = false);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isLoadingPosts = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(backgroundColor: Colors.red, content: Text('Feed load error: $e')),
+        );
+      }
     }
   }
 
