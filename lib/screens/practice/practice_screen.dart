@@ -691,3 +691,298 @@ class _ActiveCallScreenState extends State {
     );
   }
 }
+
+class RandomCallScreen extends StatefulWidget {
+  final String roomId;
+  final UserProfile currentProfile;
+  final String partnerHandle;
+  final bool isCaller;
+  final bool isVideo;
+
+  const RandomCallScreen({
+    super.key,
+    required this.roomId,
+    required this.currentProfile,
+    required this.partnerHandle,
+    required this.isCaller,
+    required this.isVideo,
+  });
+
+  @override
+  State createState() => _RandomCallScreenState();
+}
+
+class _RandomCallScreenState extends State {
+  final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
+  final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
+  RTCPeerConnection? _pc;
+  MediaStream? _localStream;
+  RealtimeChannel? _signalChannel;
+  final Set _processedIds = {};
+  final List _pendingRemoteIce = [];
+  bool _remoteDescSet = false;
+
+  String _statusText = 'Initializing audio...';
+  bool _isConnected = false;
+  bool _isMuted = false;
+  bool _isCameraOff = false;
+  Timer? _timer;
+  int _seconds = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _startWebRtc();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _cleanup();
+    super.dispose();
+  }
+
+  Future _cleanup() async {
+    try {
+      if (_signalChannel != null) await supabase.removeChannel(_signalChannel!);
+      _localStream?.getTracks().forEach((t) => t.stop());
+      await _localStream?.dispose();
+      await _pc?.close();
+      await _localRenderer.dispose();
+      await _remoteRenderer.dispose();
+    } catch (_) {}
+  }
+
+  Future _startWebRtc() async {
+    final w = widget as RandomCallScreen;
+    await _localRenderer.initialize();
+    await _remoteRenderer.initialize();
+
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia({
+        'audio': true,
+        'video': w.isVideo ? {'facingMode': 'user'} : false,
+      });
+      _localRenderer.srcObject = _localStream;
+    } catch (e) {
+      if (mounted) setState(() => _statusText = 'Mic/Camera blocked: $e');
+      return;
+    }
+
+    _pc = await createPeerConnection({
+      'iceServers': [
+        {'urls': 'stun:stun.l.google.com:19302'},
+        {'urls': 'stun:stun1.l.google.com:19302'},
+      ],
+    });
+
+    for (final track in _localStream!.getTracks()) {
+      await _pc!.addTrack(track, _localStream!);
+    }
+
+    _pc!.onTrack = (RTCTrackEvent event) {
+      if (event.streams.isNotEmpty && mounted) {
+        setState(() {
+          _remoteRenderer.srcObject = event.streams[0];
+          _isConnected = true;
+          _statusText = 'Connected';
+        });
+        _startClock();
+      }
+    };
+
+    _pc!.onConnectionState = (RTCPeerConnectionState state) {
+      if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected && mounted) {
+        setState(() {
+          _isConnected = true;
+          _statusText = 'Connected';
+        });
+        _startClock();
+      }
+    };
+
+    _pc!.onIceCandidate = (RTCIceCandidate c) async {
+      if (c.candidate != null) {
+        await supabase.from('call_signals').insert({
+          'room_id': w.roomId,
+          'sender_id': w.currentProfile.id,
+          'type': 'ice',
+          'payload': {'candidate': c.candidate, 'sdpMid': c.sdpMid, 'sdpMLineIndex': c.sdpMLineIndex},
+        });
+      }
+    };
+
+    _signalChannel = supabase
+        .channel('sig_${w.roomId}')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.insert,
+          schema: 'public',
+          table: 'call_signals',
+          callback: (payload) => _handleSignalRow(payload.newRecord),
+        )
+        .subscribe();
+
+    if (mounted) setState(() => _statusText = 'Connecting with ${w.partnerHandle}...');
+
+    if (w.isCaller) {
+      final offer = await _pc!.createOffer();
+      await _pc!.setLocalDescription(offer);
+      await supabase.from('call_signals').insert({
+        'room_id': w.roomId,
+        'sender_id': w.currentProfile.id,
+        'type': 'offer',
+        'payload': {'sdp': offer.sdp, 'type': offer.type},
+      });
+    } else {
+      final existing = await supabase.from('call_signals').select().eq('room_id', w.roomId).order('created_at', ascending: true);
+      for (final row in (existing as List)) {
+        await _handleSignalRow(row as Map);
+      }
+    }
+  }
+
+  Future _handleSignalRow(Map row) async {
+    final w = widget as RandomCallScreen;
+    final id = row['id']?.toString() ?? '';
+    if (id.isNotEmpty && _processedIds.contains(id)) return;
+    if (id.isNotEmpty) _processedIds.add(id);
+    if (row['sender_id'] == w.currentProfile.id) return;
+
+    final type = row['type'].toString();
+    final data = row['payload'] as Map;
+
+    if (type == 'offer' && !w.isCaller && _pc != null) {
+      await _pc!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['type']));
+      _remoteDescSet = true;
+      for (final ice in _pendingRemoteIce) {
+        await _pc!.addCandidate(ice);
+      }
+      _pendingRemoteIce.clear();
+
+      final answer = await _pc!.createAnswer();
+      await _pc!.setLocalDescription(answer);
+      await supabase.from('call_signals').insert({
+        'room_id': w.roomId,
+        'sender_id': w.currentProfile.id,
+        'type': 'answer',
+        'payload': {'sdp': answer.sdp, 'type': answer.type},
+      });
+    } else if (type == 'answer' && w.isCaller && _pc != null) {
+      await _pc!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['type']));
+      _remoteDescSet = true;
+      for (final ice in _pendingRemoteIce) {
+        await _pc!.addCandidate(ice);
+      }
+      _pendingRemoteIce.clear();
+    } else if (type == 'ice' && _pc != null) {
+      final candidate = RTCIceCandidate(data['candidate'], data['sdpMid'], data['sdpMLineIndex']);
+      if (_remoteDescSet) {
+        await _pc!.addCandidate(candidate);
+      } else {
+        _pendingRemoteIce.add(candidate);
+      }
+    } else if (type == 'hangup' && mounted) {
+      Navigator.pop(context);
+    }
+  }
+
+  void _startClock() {
+    if (_timer != null) return;
+    _timer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() => _seconds += 1);
+    });
+  }
+
+  String _fmt(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
+
+  Future _hangUp() async {
+    final w = widget as RandomCallScreen;
+    try {
+      await supabase.from('call_signals').insert({
+        'room_id': w.roomId,
+        'sender_id': w.currentProfile.id,
+        'type': 'hangup',
+        'payload': {},
+      });
+    } catch (_) {}
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final w = widget as RandomCallScreen;
+    return Scaffold(
+      backgroundColor: const Color(0xFF1A2421),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
+        title: Text(w.partnerHandle),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: w.isVideo
+                  ? Stack(
+                      children: [
+                        Positioned.fill(child: RTCVideoView(_remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)),
+                        Positioned(right: 16, top: 16, width: 110, height: 150, child: ClipRRect(borderRadius: BorderRadius.circular(12), child: RTCVideoView(_localRenderer, mirror: true))),
+                      ],
+                    )
+                  : Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          CircleAvatar(radius: 54, backgroundColor: Theme.of(context).colorScheme.primary, child: const Icon(Icons.person, size: 54, color: Colors.white)),
+                          const SizedBox(height: 20),
+                          Text(w.partnerHandle, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          Text(_isConnected ? 'Connected • ${_fmt(_seconds)}' : _statusText, style: const TextStyle(color: Colors.white70, fontSize: 16)),
+                        ],
+                      ),
+                    ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28.0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  CircleAvatar(
+                    radius: 28,
+                    backgroundColor: _isMuted ? Colors.white : Colors.white24,
+                    child: IconButton(
+                      icon: Icon(_isMuted ? Icons.mic_off : Icons.mic, color: _isMuted ? Colors.black : Colors.white),
+                      onPressed: () {
+                        final next = !_isMuted;
+                        _localStream?.getAudioTracks().forEach((t) => t.enabled = !next);
+                        setState(() => _isMuted = next);
+                      },
+                    ),
+                  ),
+                  if (w.isVideo)
+                    CircleAvatar(
+                      radius: 28,
+                      backgroundColor: _isCameraOff ? Colors.white : Colors.white24,
+                      child: IconButton(
+                        icon: Icon(_isCameraOff ? Icons.videocam_off : Icons.videocam, color: _isCameraOff ? Colors.black : Colors.white),
+                        onPressed: () {
+                          final next = !_isCameraOff;
+                          _localStream?.getVideoTracks().forEach((t) => t.enabled = !next);
+                          setState(() => _isCameraOff = next);
+                        },
+                      ),
+                    ),
+                  CircleAvatar(
+                    radius: 32,
+                    backgroundColor: Colors.red,
+                    child: IconButton(icon: const Icon(Icons.call_end, color: Colors.white, size: 28), onPressed: _hangUp),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

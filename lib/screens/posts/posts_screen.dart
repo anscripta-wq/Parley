@@ -1,3 +1,4 @@
+import '../../services/sound_service.dart';
 import 'package:flutter/material.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
@@ -162,9 +163,7 @@ class _PostsScreenState extends State {
     return Scaffold(
       appBar: AppBar(
         title: const Text('The Common Room'),
-        actions: [
-          IconButton(icon: const Icon(Icons.refresh), onPressed: w.onRefresh),
-        ],
+        
       ),
       body: Column(
         children: [

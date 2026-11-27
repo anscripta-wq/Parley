@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
+import '../../services/sound_service.dart';
 import '../../services/supabase_client.dart';
 import '../../widgets/common_widgets.dart';
 
@@ -9,6 +10,8 @@ class UserProfileScreen extends StatefulWidget {
   final UserProfile profile;
   final Future Function({
     required String handle,
+    required String gender,
+    required String country,
     required String nativeLang,
     required String learningLang,
     required String bio,
@@ -37,50 +40,31 @@ class _UserProfileScreenState extends State {
   Future _pickAndUploadAvatar() async {
     final w = widget as UserProfileScreen;
     if (_isUploadingAvatar) return;
-
     try {
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 512,
-        maxHeight: 512,
-        imageQuality: 80,
-      );
+      final picked = await ImagePicker().pickImage(source: ImageSource.gallery, maxWidth: 512, maxHeight: 512, imageQuality: 80);
       if (picked == null) return;
-
       setState(() => _isUploadingAvatar = true);
       final bytes = await picked.readAsBytes();
       final ext = picked.name.split('.').last.toLowerCase();
       final safeExt = (ext == 'png' || ext == 'webp') ? ext : 'jpg';
       final fileName = '${w.profile.id}/avatar_${DateTime.now().millisecondsSinceEpoch}.$safeExt';
 
-      await supabase.storage.from('avatars').uploadBinary(
-        fileName,
-        bytes,
-        fileOptions: FileOptions(contentType: 'image/$safeExt', upsert: true),
-      );
-
+      await supabase.storage.from('avatars').uploadBinary(fileName, bytes, fileOptions: FileOptions(contentType: 'image/$safeExt', upsert: true));
       final publicUrl = supabase.storage.from('avatars').getPublicUrl(fileName);
 
       await w.onUpdateProfile(
         handle: w.profile.handle.replaceFirst('@', ''),
+        gender: w.profile.gender,
+        country: w.profile.country,
         nativeLang: w.profile.nativeLang,
         learningLang: w.profile.learningLang,
         bio: w.profile.bio,
         avatarUrl: publicUrl,
       );
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Profile photo updated!')),
-        );
-      }
+      SoundService.playMessageChime();
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile photo updated!')));
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not upload photo: $e')),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not upload photo: $e')));
     } finally {
       if (mounted) setState(() => _isUploadingAvatar = false);
     }
@@ -90,9 +74,12 @@ class _UserProfileScreenState extends State {
     final w = widget as UserProfileScreen;
     final handleCtrl = TextEditingController(text: w.profile.handle.replaceFirst('@', ''));
     final bioCtrl = TextEditingController(text: w.profile.bio);
-    String native = w.profile.nativeLang;
-    String learning = w.profile.learningLang;
+    String gender = (w.profile.gender == 'Male' || w.profile.gender == 'Female') ? w.profile.gender : 'Male';
+    String country = kCountryFlags.containsKey(w.profile.country) ? w.profile.country : 'Pakistan';
+    String native = kSupportedLanguages.contains(w.profile.nativeLang) ? w.profile.nativeLang : 'English (US) 🇺🇸';
+    String learning = kSupportedLanguages.contains(w.profile.learningLang) ? w.profile.learningLang : 'English (UK) 🇬🇧';
     String error = '';
+    final countries = kCountryFlags.keys.toList()..sort();
 
     await showDialog(
       context: context,
@@ -103,39 +90,41 @@ class _UserProfileScreenState extends State {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                TextField(
-                  controller: handleCtrl,
-                  decoration: const InputDecoration(labelText: 'Username', prefixText: '@'),
+                TextField(controller: handleCtrl, decoration: const InputDecoration(labelText: 'Username', prefixText: '@')),
+                const SizedBox(height: 12),
+                DropdownButtonFormField(
+                  initialValue: gender,
+                  decoration: const InputDecoration(labelText: 'Gender'),
+                  items: const [
+                    DropdownMenuItem(value: 'Male', child: Text('👨 Male')),
+                    DropdownMenuItem(value: 'Female', child: Text('👩 Female')),
+                  ],
+                  onChanged: (v) => setModalState(() => gender = (v ?? gender).toString()),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField(
-                  initialValue: kSupportedLanguages.contains(native) ? native : 'English',
+                  initialValue: country,
+                  decoration: const InputDecoration(labelText: 'Country'),
+                  items: countries.map((c) => DropdownMenuItem(value: c, child: Text('${countryToFlag(c)}  $c'))).toList(),
+                  onChanged: (v) => setModalState(() => country = (v ?? country).toString()),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField(
+                  initialValue: native,
                   decoration: const InputDecoration(labelText: 'Native Language'),
-                  items: kSupportedLanguages
-                      .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                      .toList(),
+                  items: kSupportedLanguages.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
                   onChanged: (v) => setModalState(() => native = (v ?? native).toString()),
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField(
-                  initialValue: kSupportedLanguages.contains(learning) ? learning : 'Spanish',
+                  initialValue: learning,
                   decoration: const InputDecoration(labelText: 'Learning Language'),
-                  items: kSupportedLanguages
-                      .map((l) => DropdownMenuItem(value: l, child: Text(l)))
-                      .toList(),
+                  items: kSupportedLanguages.map((l) => DropdownMenuItem(value: l, child: Text(l))).toList(),
                   onChanged: (v) => setModalState(() => learning = (v ?? learning).toString()),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: bioCtrl,
-                  maxLines: 3,
-                  decoration: const InputDecoration(labelText: 'Bio'),
-                ),
-                if (error.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    child: Text(error, style: const TextStyle(color: Colors.red, fontSize: 12)),
-                  ),
+                TextField(controller: bioCtrl, maxLines: 3, decoration: const InputDecoration(labelText: 'Bio')),
+                if (error.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8.0), child: Text(error, style: const TextStyle(color: Colors.red, fontSize: 12))),
               ],
             ),
           ),
@@ -151,16 +140,17 @@ class _UserProfileScreenState extends State {
                 try {
                   await w.onUpdateProfile(
                     handle: clean,
+                    gender: gender,
+                    country: country,
                     nativeLang: native,
                     learningLang: learning,
                     bio: bioCtrl.text.trim(),
                     avatarUrl: w.profile.avatarUrl,
                   );
+                  SoundService.playMessageChime();
                   if (dialogContext.mounted) Navigator.pop(dialogContext);
                 } on PostgrestException catch (e) {
-                  setModalState(() {
-                    error = e.code == '23505' ? 'That username is already taken.' : e.message;
-                  });
+                  setModalState(() => error = e.code == '23505' ? 'That username is already taken.' : e.message);
                 }
               },
               child: const Text('Save'),
@@ -209,13 +199,10 @@ class _UserProfileScreenState extends State {
   @override
   Widget build(BuildContext context) {
     final w = widget as UserProfileScreen;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('My Profile'),
-        actions: [
-          IconButton(icon: const Icon(Icons.edit), onPressed: _showEditProfileDialog),
-        ],
+        actions: [IconButton(icon: const Icon(Icons.edit), onPressed: _showEditProfileDialog)],
       ),
       body: SingleChildScrollView(
         child: Column(
@@ -227,41 +214,29 @@ class _UserProfileScreenState extends State {
                 InkWell(
                   onTap: _pickAndUploadAvatar,
                   borderRadius: BorderRadius.circular(50),
-                  child: _isUploadingAvatar
-                      ? const CircleAvatar(radius: 48, child: CircularProgressIndicator())
-                      : ParleyAvatar(profile: w.profile, radius: 48),
+                  child: _isUploadingAvatar ? const CircleAvatar(radius: 48, child: CircularProgressIndicator()) : ParleyAvatar(profile: w.profile, radius: 48),
                 ),
                 CircleAvatar(
                   radius: 16,
                   backgroundColor: Theme.of(context).colorScheme.primary,
-                  child: IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.camera_alt, size: 16, color: Colors.white),
-                    onPressed: _pickAndUploadAvatar,
-                  ),
+                  child: IconButton(padding: EdgeInsets.zero, icon: const Icon(Icons.camera_alt, size: 16, color: Colors.white), onPressed: _pickAndUploadAvatar),
                 ),
               ],
             ),
             const SizedBox(height: 14),
-            Text(w.profile.handle, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            Text('${w.profile.handle} ${w.profile.countryFlag}', style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            Text('${w.profile.gender} • ${w.profile.country}', style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 24.0),
-              child: Text(
-                w.profile.bio,
-                style: TextStyle(color: Theme.of(context).disabledColor, fontSize: 14, fontStyle: FontStyle.italic),
-                textAlign: TextAlign.center,
-              ),
+              child: Text(w.profile.bio, style: TextStyle(color: Theme.of(context).disabledColor, fontSize: 14, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
             ),
             const SizedBox(height: 24),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
               child: Container(
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Theme.of(context).dividerColor),
-                ),
+                decoration: BoxDecoration(color: Theme.of(context).cardColor, borderRadius: BorderRadius.circular(12), border: Border.all(color: Theme.of(context).dividerColor)),
                 child: Column(
                   children: [
                     ListTile(
@@ -295,11 +270,7 @@ class _UserProfileScreenState extends State {
             ListTile(
               leading: Icon(Icons.dark_mode, color: Theme.of(context).colorScheme.secondary),
               title: const Text('Night Reading Mode'),
-              trailing: Switch(
-                value: w.isDarkMode,
-                onChanged: (_) => w.onToggleTheme(),
-                activeThumbColor: Theme.of(context).colorScheme.primary,
-              ),
+              trailing: Switch(value: w.isDarkMode, onChanged: (_) => w.onToggleTheme(), activeThumbColor: Theme.of(context).colorScheme.primary),
             ),
             const SizedBox(height: 24),
             Padding(
@@ -308,9 +279,7 @@ class _UserProfileScreenState extends State {
                 width: double.infinity,
                 height: 50,
                 child: OutlinedButton(
-                  onPressed: () async {
-                    await supabase.auth.signOut();
-                  },
+                  onPressed: () async => await supabase.auth.signOut(),
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red)),
                   child: const Text('Log Out'),
                 ),

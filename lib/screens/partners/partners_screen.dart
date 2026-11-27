@@ -115,8 +115,8 @@ class _PartnersScreenState extends State {
                         margin: const EdgeInsets.only(bottom: 12),
                         child: ListTile(
                           leading: ParleyAvatar(profile: partner),
-                          title: Text(partner.handle, style: const TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('Speaks ${partner.nativeLang} • Learning ${partner.learningLang}'),
+                          title: Text('${partner.handle} ${partner.countryFlag}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          subtitle: Text('${partner.gender} • ${partner.country} • Speaks ${partner.nativeLang}'),
                           trailing: const Icon(Icons.arrow_forward_ios, size: 16),
                           onTap: () {
                             Navigator.push(
@@ -165,7 +165,7 @@ class PartnerDetailScreen extends StatelessWidget {
             Wrap(
               spacing: 10,
               children: [
-                Chip(label: Text('Native: ${partner.nativeLang}')),
+                Chip(label: Text('${partner.countryFlag} ${partner.country}')), Chip(label: Text(partner.gender)), Chip(label: Text('Native: ${partner.nativeLang}')),
                 Chip(label: Text('Learning: ${partner.learningLang}')),
               ],
             ),

@@ -1,112 +1,36 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
 
-class WelcomeScreen extends StatefulWidget {
-  final bool isDarkMode;
-  final VoidCallback onToggleTheme;
-
-  const WelcomeScreen({
-    super.key,
-    required this.isDarkMode,
-    required this.onToggleTheme,
-  });
-
-  @override
-  State createState() => _WelcomeScreenState();
-}
-
-class _WelcomeScreenState extends State {
-  bool _isSigningInWithGoogle = false;
-
-  Future _signInWithGoogle() async {
-    if (_isSigningInWithGoogle) return;
-    setState(() => _isSigningInWithGoogle = true);
-
-    try {
-      await supabase.auth.signInWithOAuth(
-        OAuthProvider.google,
-        redirectTo: kIsWeb ? 'https://anscripta-wq.github.io/Parley/' : null,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Google sign-in failed: $e')),
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() => _isSigningInWithGoogle = false);
-      }
-    }
-  }
+class WelcomeScreen extends StatelessWidget {
+  const WelcomeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Icon(Icons.auto_stories, size: 80, color: Theme.of(context).colorScheme.primary),
-                  const SizedBox(height: 20),
-                  Text(
-                    'Parley',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 40,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.primary,
-                      letterSpacing: 2,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    'A sanctuary for language learners and literary minds.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 16,
-                      fontStyle: FontStyle.italic,
-                      color: Theme.of(context).textTheme.bodyLarge?.color,
-                    ),
-                  ),
-                  const SizedBox(height: 50),
-                  ElevatedButton.icon(
-                    onPressed: _isSigningInWithGoogle ? null : _signInWithGoogle,
-                    icon: _isSigningInWithGoogle
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                        : const Icon(Icons.g_mobiledata, size: 30),
-                    label: Text(_isSigningInWithGoogle ? 'Connecting to Google...' : 'Continue with Google'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).cardColor,
-                      foregroundColor: Theme.of(context).textTheme.bodyLarge?.color,
-                      side: BorderSide(color: Theme.of(context).dividerColor),
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                  ),
-                  const SizedBox(height: 15),
-                  ElevatedButton.icon(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const EmailAuthScreen()),
-                      );
-                    },
-                    icon: const Icon(Icons.email),
-                    label: const Text('Continue with Email'),
-                    style: ElevatedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16)),
-                  ),
-                ],
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.auto_stories, size: 80, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 16),
+              const Text('Parley', style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, letterSpacing: 1.5)),
+              const SizedBox(height: 8),
+              Text('Literary Language Exchange', style: TextStyle(fontSize: 16, color: Theme.of(context).disabledColor, fontStyle: FontStyle.italic)),
+              const SizedBox(height: 48),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.email_outlined),
+                  label: const Text('Continue with Email', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmailAuthScreen())),
+                ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -116,17 +40,15 @@ class _WelcomeScreenState extends State {
 
 class EmailAuthScreen extends StatefulWidget {
   const EmailAuthScreen({super.key});
-
   @override
   State createState() => _EmailAuthScreenState();
 }
 
 class _EmailAuthScreenState extends State {
-  final TextEditingController _emailController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  bool _isLoginMode = true;
-  bool _obscurePassword = true;
-  bool _isSubmitting = false;
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isLogin = true;
+  bool _isLoading = false;
   String _errorMessage = '';
 
   @override
@@ -139,160 +61,64 @@ class _EmailAuthScreenState extends State {
   Future _submit() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
-
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() => _errorMessage = 'Please enter a valid email address.');
+    if (email.isEmpty || password.length <= 5) {
+      setState(() => _errorMessage = 'Enter a valid email and a password of at least 6 characters.');
       return;
     }
-    if (password.length <= 5) {
-      setState(() => _errorMessage = 'Password must be at least 6 characters long.');
-      return;
-    }
-
-    setState(() {
-      _isSubmitting = true;
-      _errorMessage = '';
-    });
-
+    setState(() { _isLoading = true; _errorMessage = ''; });
     try {
-      if (_isLoginMode) {
+      if (_isLogin) {
         await supabase.auth.signInWithPassword(email: email, password: password);
+        if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
       } else {
-        final response = await supabase.auth.signUp(email: email, password: password);
-        if (response.session == null && mounted) {
-          setState(() {
-            _isSubmitting = false;
-            _errorMessage = 'Account created! Please check your email inbox to confirm, then sign in.';
-          });
-          return;
+        final res = await supabase.auth.signUp(email: email, password: password);
+        if (mounted) {
+          if (res.session != null) {
+            Navigator.of(context).popUntil((r) => r.isFirst);
+          } else {
+            setState(() {
+              _isLoading = false;
+              _isLogin = true;
+              _errorMessage = 'Account created! Please check your email or sign in.';
+            });
+          }
         }
       }
-      if (mounted) {
-        Navigator.of(context).popUntil((route) => route.isFirst);
-      }
     } on AuthException catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = e.message;
-          _isSubmitting = false;
-        });
-      }
+      if (mounted) setState(() { _errorMessage = e.message; _isLoading = false; });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _errorMessage = 'Authentication failed: $e';
-          _isSubmitting = false;
-        });
-      }
-    }
-  }
-
-  Future _resetPassword() async {
-    final email = _emailController.text.trim();
-    if (email.isEmpty || !email.contains('@')) {
-      setState(() => _errorMessage = 'Enter your email above first to reset password.');
-      return;
-    }
-    try {
-      await supabase.auth.resetPasswordForEmail(
-        email,
-        redirectTo: kIsWeb ? 'https://anscripta-wq.github.io/Parley/' : null,
-      );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Password reset link sent to your email.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _errorMessage = 'Could not send reset email: $e');
-      }
+      if (mounted) setState(() { _errorMessage = 'Unexpected error: $e'; _isLoading = false; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_isLoginMode ? 'Sign In' : 'Create Account')),
+      appBar: AppBar(title: Text(_isLogin ? 'Sign In' : 'Create Account')),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Icon(Icons.auto_stories, size: 56, color: Theme.of(context).colorScheme.primary),
-                const SizedBox(height: 16),
-                Text(
-                  _isLoginMode ? 'Welcome Back' : 'Join Parley',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(controller: _emailController, keyboardType: TextInputType.emailAddress, decoration: const InputDecoration(labelText: 'Email', border: OutlineInputBorder())),
+              const SizedBox(height: 16),
+              TextField(controller: _passwordController, obscureText: true, decoration: const InputDecoration(labelText: 'Password', border: OutlineInputBorder())),
+              const SizedBox(height: 16),
+              if (_errorMessage.isNotEmpty)
+                Padding(padding: const EdgeInsets.only(bottom: 12.0), child: Text(_errorMessage, style: TextStyle(color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold))),
+              SizedBox(
+                height: 50,
+                child: ElevatedButton(
+                  onPressed: _isLoading ? null : _submit,
+                  child: _isLoading ? const CircularProgressIndicator(color: Colors.white) : Text(_isLogin ? 'Sign In' : 'Sign Up'),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  _isLoginMode
-                      ? 'Sign in with your email and password.'
-                      : 'Create an account to save your profile, posts, and chats.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).disabledColor),
-                ),
-                const SizedBox(height: 28),
-                TextField(
-                  controller: _emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: 'Email Address',
-                    prefixIcon: Icon(Icons.email_outlined),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _passwordController,
-                  obscureText: _obscurePassword,
-                  onSubmitted: (_) => _submit(),
-                  decoration: InputDecoration(
-                    labelText: 'Password',
-                    prefixIcon: const Icon(Icons.lock_outline),
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(_obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined),
-                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                    ),
-                  ),
-                ),
-                if (_isLoginMode)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(onPressed: _resetPassword, child: const Text('Forgot Password?')),
-                  )
-                else
-                  const SizedBox(height: 16),
-                if (_errorMessage.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12.0),
-                    child: Text(_errorMessage, style: const TextStyle(color: Colors.red, fontSize: 13)),
-                  ),
-                SizedBox(
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isSubmitting ? null : _submit,
-                    child: _isSubmitting
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Text(_isLoginMode ? 'Sign In' : 'Create Account'),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextButton(
-                  onPressed: () => setState(() {
-                    _isLoginMode = !_isLoginMode;
-                    _errorMessage = '';
-                  }),
-                  child: Text(_isLoginMode ? "Don't have an account? Create one" : 'Already have an account? Sign in'),
-                ),
-              ],
-            ),
+              ),
+              TextButton(
+                onPressed: () => setState(() { _isLogin = !_isLogin; _errorMessage = ''; }),
+                child: Text(_isLogin ? 'Need an account? Sign Up' : 'Already have an account? Sign In'),
+              ),
+            ],
           ),
         ),
       ),
@@ -301,51 +127,24 @@ class _EmailAuthScreenState extends State {
 }
 
 class OnboardingScreen extends StatefulWidget {
-  final bool isDarkMode;
-  final VoidCallback onToggleTheme;
-  final VoidCallback onProfileCreated;
+  final User user;
+  final void Function(UserProfile profile) onProfileSaved;
 
-  const OnboardingScreen({
-    super.key,
-    required this.isDarkMode,
-    required this.onToggleTheme,
-    required this.onProfileCreated,
-  });
+  const OnboardingScreen({super.key, required this.user, required this.onProfileSaved});
 
   @override
   State createState() => _OnboardingScreenState();
 }
 
 class _OnboardingScreenState extends State {
-  String? _selectedNative;
-  String? _selectedLearning;
-  String? _avatarUrl;
-
-  final TextEditingController _handleController = TextEditingController();
-  final TextEditingController _bioController = TextEditingController();
-
-  String _handleError = '';
+  final _handleController = TextEditingController();
+  final _bioController = TextEditingController();
+  String _gender = 'Male';
+  String _country = 'Pakistan';
+  String _nativeLang = 'Urdu';
+  String _learningLang = 'English (US) 🇺🇸';
   bool _isSaving = false;
-
-  @override
-  void initState() {
-    super.initState();
-    final user = supabase.auth.currentUser;
-    if (user != null) {
-      final metadata = user.userMetadata;
-      if (metadata != null && metadata['avatar_url'] != null) {
-        _avatarUrl = metadata['avatar_url'].toString();
-      }
-      if (user.email != null && _handleController.text.isEmpty) {
-        final suggested = user.email!
-            .split('@')
-            .first
-            .replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_')
-            .toLowerCase();
-        _handleController.text = suggested;
-      }
-    }
-  }
+  String _errorMessage = '';
 
   @override
   void dispose() {
@@ -354,189 +153,113 @@ class _OnboardingScreenState extends State {
     super.dispose();
   }
 
-  Future _checkAndCreateProfile() async {
-    if (_isSaving) return;
-    final user = supabase.auth.currentUser;
-    if (user == null) return;
-
-    final rawHandle = _handleController.text.trim().toLowerCase().replaceFirst('@', '');
-
-    if (rawHandle.isEmpty) {
-      setState(() => _handleError = 'Please enter a username.');
+  Future _saveProfile() async {
+    final w = widget as OnboardingScreen;
+    final cleanHandle = _handleController.text.trim().toLowerCase().replaceFirst('@', '');
+    if (cleanHandle.length <= 2) {
+      setState(() => _errorMessage = 'Username must be at least 3 characters.');
       return;
     }
-    if (!RegExp(r'^[a-z0-9_]{3,20}$').hasMatch(rawHandle)) {
-      setState(() => _handleError = 'Username must be 3-20 characters (letters, numbers, or _).');
-      return;
-    }
-    if (_selectedNative == null || _selectedLearning == null) {
-      setState(() => _handleError = 'Please select both languages.');
-      return;
-    }
-    if (_selectedNative == _selectedLearning) {
-      setState(() => _handleError = 'Native and Learning languages cannot be the same.');
-      return;
-    }
-    if (_bioController.text.trim().isEmpty) {
-      setState(() => _handleError = 'Please write a short bio about your goals.');
-      return;
-    }
-
-    setState(() {
-      _isSaving = true;
-      _handleError = '';
-    });
-
+    setState(() { _isSaving = true; _errorMessage = ''; });
     try {
-      final formattedHandle = '@$rawHandle';
-      final existing = await supabase
-          .from('profiles')
-          .select('id')
-          .or('handle.eq.$formattedHandle,handle.eq.$rawHandle')
-          .maybeSingle();
+      final bioText = _bioController.text.trim().isEmpty
+          ? 'Practicing $_learningLang through conversation and reading.'
+          : _bioController.text.trim();
 
-      if (existing != null) {
-        setState(() {
-          _handleError = 'Username $formattedHandle is already taken. Try another.';
-          _isSaving = false;
-        });
-        return;
-      }
+      final inserted = await supabase.from('profiles').upsert({
+        'id': w.user.id,
+        'handle': cleanHandle,
+        'gender': _gender,
+        'country': _country,
+        'native_lang': _nativeLang,
+        'learning_lang': _learningLang,
+        'bio': bioText,
+      }).select().single();
 
-      await supabase.from('profiles').insert({
-        'id': user.id,
-        'handle': formattedHandle,
-        'native_lang': _selectedNative,
-        'learning_lang': _selectedLearning,
-        'bio': _bioController.text.trim(),
-        'avatar_url': _avatarUrl,
-        'streak_count': 1,
-      });
-
-      if (mounted) {
-        (widget as OnboardingScreen).onProfileCreated();
-      }
+      w.onProfileSaved(UserProfile.fromMap(inserted));
     } on PostgrestException catch (e) {
       if (mounted) {
         setState(() {
-          _handleError = e.code == '23505'
-              ? 'Username @$rawHandle is already taken. Try another.'
-              : 'Could not save profile: ${e.message}';
+          _errorMessage = e.code == '23505' ? 'That @username is already taken.' : e.message;
           _isSaving = false;
         });
       }
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          _handleError = 'Unexpected error: $e';
-          _isSaving = false;
-        });
-      }
+      if (mounted) setState(() { _errorMessage = 'Could not save profile: $e'; _isSaving = false; });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final countries = kCountryFlags.keys.toList()..sort();
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Create Your Profile'),
-        actions: [
-          TextButton(onPressed: () => supabase.auth.signOut(), child: const Text('Sign Out')),
-        ],
+        title: const Text('Create Your Reader Profile'),
+        actions: [IconButton(icon: const Icon(Icons.logout), onPressed: () async => await supabase.auth.signOut())],
       ),
       body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 500),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                const Text('Join the Library', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold), textAlign: TextAlign.center),
-                const SizedBox(height: 10),
-                Text(
-                  'Choose a unique username, set your languages, and tell us about yourself.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Theme.of(context).disabledColor),
-                ),
-                const SizedBox(height: 24),
-                Center(
-                  child: CircleAvatar(
-                    radius: 44,
-                    backgroundColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.2),
-                    backgroundImage: (_avatarUrl != null && _avatarUrl!.isNotEmpty) ? NetworkImage(_avatarUrl!) : null,
-                    child: (_avatarUrl == null || _avatarUrl!.isEmpty)
-                        ? Icon(Icons.person, size: 40, color: Theme.of(context).colorScheme.primary)
-                        : null,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                TextField(
-                  controller: _handleController,
-                  decoration: InputDecoration(
-                    labelText: 'Unique Username',
-                    hintText: 'e.g. reader_99',
-                    prefixText: '@',
-                    errorText: _handleError.isNotEmpty ? _handleError : null,
-                    border: const OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.alternate_email, color: Theme.of(context).colorScheme.primary),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                DropdownButtonFormField(
-                  initialValue: _selectedNative,
-                  decoration: InputDecoration(
-                    labelText: 'I speak (Native Language)',
-                    border: const OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.flag, color: Theme.of(context).colorScheme.primary),
-                  ),
-                  isExpanded: true,
-                  items: kSupportedLanguages
-                      .map((lang) => DropdownMenuItem(value: lang, child: Text(lang, overflow: TextOverflow.ellipsis)))
-                      .toList(),
-                  onChanged: (val) => setState(() => _selectedNative = val as String?),
-                ),
-                const SizedBox(height: 20),
-                DropdownButtonFormField(
-                  initialValue: _selectedLearning,
-                  decoration: InputDecoration(
-                    labelText: 'I am learning (Target Language)',
-                    border: const OutlineInputBorder(),
-                    prefixIcon: Icon(Icons.language, color: Theme.of(context).colorScheme.primary),
-                  ),
-                  isExpanded: true,
-                  items: kSupportedLanguages
-                      .map((lang) => DropdownMenuItem(value: lang, child: Text(lang, overflow: TextOverflow.ellipsis)))
-                      .toList(),
-                  onChanged: (val) => setState(() => _selectedLearning = val as String?),
-                ),
-                const SizedBox(height: 20),
-                TextField(
-                  controller: _bioController,
-                  maxLines: 3,
-                  decoration: InputDecoration(
-                    labelText: 'Short Bio',
-                    hintText: 'Why are you learning? What do you like to read?',
-                    border: const OutlineInputBorder(),
-                    alignLabelWithHint: true,
-                    prefixIcon: Padding(
-                      padding: const EdgeInsets.only(bottom: 40.0),
-                      child: Icon(Icons.edit, color: Theme.of(context).colorScheme.primary),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(controller: _handleController, decoration: const InputDecoration(labelText: 'Username', prefixText: '@', border: OutlineInputBorder())),
+              const SizedBox(height: 16),
+              const Text('Gender', style: TextStyle(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Center(child: Text('👨 Male')),
+                      selected: _gender == 'Male',
+                      onSelected: (_) => setState(() => _gender = 'Male'),
                     ),
                   ),
-                ),
-                const SizedBox(height: 32),
-                SizedBox(
-                  height: 50,
-                  child: ElevatedButton(
-                    onPressed: _isSaving ? null : _checkAndCreateProfile,
-                    child: _isSaving
-                        ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : const Text('Enter the Library'),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: ChoiceChip(
+                      label: const Center(child: Text('👩 Female')),
+                      selected: _gender == 'Female',
+                      onSelected: (_) => setState(() => _gender = 'Female'),
+                    ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField(
+                initialValue: _country,
+                decoration: const InputDecoration(labelText: 'Country', border: OutlineInputBorder()),
+                items: countries.map((c) => DropdownMenuItem(value: c, child: Text('${countryToFlag(c)}  $c'))).toList(),
+                onChanged: (val) => setState(() => _country = (val ?? 'Pakistan').toString()),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField(
+                initialValue: _nativeLang,
+                decoration: const InputDecoration(labelText: 'Native Language', border: OutlineInputBorder()),
+                items: kSupportedLanguages.map((lang) => DropdownMenuItem(value: lang, child: Text(lang))).toList(),
+                onChanged: (val) => setState(() => _nativeLang = (val ?? 'Urdu').toString()),
+              ),
+              const SizedBox(height: 16),
+              DropdownButtonFormField(
+                initialValue: _learningLang,
+                decoration: const InputDecoration(labelText: 'Learning Language', border: OutlineInputBorder()),
+                items: kSupportedLanguages.map((lang) => DropdownMenuItem(value: lang, child: Text(lang))).toList(),
+                onChanged: (val) => setState(() => _learningLang = (val ?? 'English (US) 🇺🇸').toString()),
+              ),
+              const SizedBox(height: 16),
+              TextField(controller: _bioController, maxLines: 2, decoration: const InputDecoration(labelText: 'Short Bio (Optional)', border: OutlineInputBorder())),
+              const SizedBox(height: 16),
+              if (_errorMessage.isNotEmpty)
+                Padding(padding: const EdgeInsets.only(bottom: 12.0), child: Text(_errorMessage, style: const TextStyle(color: Colors.red))),
+              SizedBox(
+                height: 52,
+                child: ElevatedButton(
+                  onPressed: _isSaving ? null : _saveProfile,
+                  child: _isSaving ? const CircularProgressIndicator(color: Colors.white) : const Text('Enter Parley', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
