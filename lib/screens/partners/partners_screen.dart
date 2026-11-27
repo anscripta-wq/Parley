@@ -153,7 +153,7 @@ class PartnerDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(partner.handle)),
+      appBar: AppBar(title: Text(partner.handle), actions: [PopupMenuButton(onSelected: (v) async { if (v == "block") { await supabase.from("blocked_users").upsert({"blocker_id": currentProfile.id, "blocked_id": partner.id}); if (context.mounted) Navigator.of(context).popUntil((r) => r.isFirst); } else { await supabase.from("user_reports").insert({"reporter_id": currentProfile.id, "reported_id": partner.id, "reason": "Reported"}); if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Report submitted."))); } }, itemBuilder: (_) => const [PopupMenuItem(value: "report", child: Text("Report User")), PopupMenuItem(value: "block", child: Text("Block User", style: TextStyle(color: Colors.red)))])]),
       body: Padding(
         padding: const EdgeInsets.all(24.0),
         child: Column(

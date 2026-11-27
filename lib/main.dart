@@ -252,7 +252,7 @@ class _MainScreenState extends State {
   @override
   void initState() {
     super.initState();
-    _profile = (widget as MainScreen).profile;
+    _profile = (widget as MainScreen).profile; supabase.from("profiles").update({"last_active_date": DateTime.now().toUtc().toIso8601String().split("T").first}).eq("id", _profile.id).then((_) {});
     _loadPosts();
     _subscribeGlobalAlerts();
   }
