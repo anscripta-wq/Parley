@@ -49,7 +49,7 @@ class _PostsScreenState extends State {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not publish post: $e')),
+          SnackBar(backgroundColor: Colors.red, duration: const Duration(seconds: 6), content: Text('Post Error: $e')),
         );
       }
     }
