@@ -10,10 +10,10 @@ class PracticeScreen extends StatefulWidget {
   final UserProfile currentProfile;
   const PracticeScreen({super.key, required this.currentProfile});
   @override
-  State createState() => _PracticeScreenState();
+  State<PracticeScreen> createState() => _PracticeScreenState();
 }
 
-class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
+class _PracticeScreenState extends State<PracticeScreen> with SingleTickerProviderStateMixin {
   bool _isSearching = false;
   bool _preferVideo = false;
   int _waitingCount = 0;
@@ -32,8 +32,7 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
     _pollTimer?.cancel();
     _pulseCtrl.dispose();
     if (_isSearching) {
-      final w = widget as PracticeScreen;
-      supabase.from('practice_queue').delete().eq('user_id', w.currentProfile.id);
+        supabase.from('practice_queue').delete().eq('user_id', widget.currentProfile.id);
     }
     super.dispose();
   }
@@ -46,8 +45,7 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
   }
 
   Future _startSearching() async {
-    final w = widget as PracticeScreen;
-    final me = w.currentProfile;
+    final me = widget.currentProfile;
     SoundService.playMessageChime();
     setState(() => _isSearching = true);
 
@@ -79,19 +77,17 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
   }
 
   Future _cancelSearching() async {
-    final w = widget as PracticeScreen;
     _pollTimer?.cancel();
     setState(() => _isSearching = false);
     try {
-      await supabase.from('practice_queue').delete().eq('user_id', w.currentProfile.id);
+      await supabase.from('practice_queue').delete().eq('user_id', widget.currentProfile.id);
     } catch (_) {}
     _refreshQueueCount();
   }
 
   Future _checkMatch() async {
     if (!_isSearching || !mounted) return;
-    final w = widget as PracticeScreen;
-    final me = w.currentProfile;
+    final me = widget.currentProfile;
 
     try {
       final myRow = await supabase.from('practice_queue').select().eq('user_id', me.id).maybeSingle();
@@ -174,8 +170,7 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final w = widget as PracticeScreen;
-    final me = w.currentProfile;
+    final me = widget.currentProfile;
     final primary = Theme.of(context).colorScheme.primary;
 
     return Scaffold(
@@ -209,8 +204,8 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
               const SizedBox(height: 36),
               ScaleTransition(
                 scale: _isSearching
-                    ? Tween(begin: 0.94, end: 1.08).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut))
-                    : const AlwaysStoppedAnimation(1.0),
+                    ? Tween<double>(begin: 0.94, end: 1.08).animate(CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut))
+                    : const AlwaysStoppedAnimation<double>(1.0),
                 child: Container(
                   width: 170,
                   height: 170,
@@ -258,10 +253,10 @@ class _PracticeScreenState extends State with SingleTickerProviderStateMixin {
                 style: TextStyle(color: Theme.of(context).disabledColor, fontSize: 14, height: 1.4),
               ),
               const SizedBox(height: 24),
-              SegmentedButton(
+              SegmentedButton<bool>(
                 segments: const [
-                  ButtonSegment(value: false, icon: Icon(Icons.call), label: Text('Voice Call')),
-                  ButtonSegment(value: true, icon: Icon(Icons.videocam), label: Text('Video Call')),
+                  ButtonSegment<bool>(value: false, icon: Icon(Icons.call), label: Text('Voice Call')),
+                  ButtonSegment<bool>(value: true, icon: Icon(Icons.videocam), label: Text('Video Call')),
                 ],
                 selected: {_preferVideo},
                 onSelectionChanged: _isSearching ? null : (s) => setState(() => _preferVideo = s.first),
@@ -291,17 +286,17 @@ class RandomCallScreen extends StatefulWidget {
   });
 
   @override
-  State createState() => _RandomCallScreenState();
+  State<RandomCallScreen> createState() => _RandomCallScreenState();
 }
 
-class _RandomCallScreenState extends State {
+class _RandomCallScreenState extends State<RandomCallScreen> {
   final RTCVideoRenderer _localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer _remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
   RealtimeChannel? _signalChannel;
-  final Set _processedIds = {};
-  final List _pendingRemoteIce = [];
+  final Set<String> _processedIds = {};
+  final List<RTCIceCandidate> _pendingRemoteIce = [];
   bool _remoteDescSet = false;
 
   String _statusText = 'Initializing audio...';
@@ -336,14 +331,13 @@ class _RandomCallScreenState extends State {
   }
 
   Future _startWebRtc() async {
-    final w = widget as RandomCallScreen;
     await _localRenderer.initialize();
     await _remoteRenderer.initialize();
 
     try {
       _localStream = await navigator.mediaDevices.getUserMedia({
         'audio': true,
-        'video': w.isVideo ? {'facingMode': 'user'} : false,
+        'video': widget.isVideo ? {'facingMode': 'user'} : false,
       });
       _localRenderer.srcObject = _localStream;
     } catch (e) {
@@ -386,8 +380,8 @@ class _RandomCallScreenState extends State {
     _pc!.onIceCandidate = (RTCIceCandidate c) async {
       if (c.candidate != null) {
         await supabase.from('call_signals').insert({
-          'room_id': w.roomId,
-          'sender_id': w.currentProfile.id,
+          'room_id': widget.roomId,
+          'sender_id': widget.currentProfile.id,
           'type': 'ice',
           'payload': {'candidate': c.candidate, 'sdpMid': c.sdpMid, 'sdpMLineIndex': c.sdpMLineIndex},
         });
@@ -395,7 +389,7 @@ class _RandomCallScreenState extends State {
     };
 
     _signalChannel = supabase
-        .channel('sig_${w.roomId}')
+        .channel('sig_${widget.roomId}')
         .onPostgresChanges(
           event: PostgresChangeEvent.insert,
           schema: 'public',
@@ -404,19 +398,19 @@ class _RandomCallScreenState extends State {
         )
         .subscribe();
 
-    if (mounted) setState(() => _statusText = 'Connecting with ${w.partnerHandle}...');
+    if (mounted) setState(() => _statusText = 'Connecting with ${widget.partnerHandle}...');
 
-    if (w.isCaller) {
+    if (widget.isCaller) {
       final offer = await _pc!.createOffer();
       await _pc!.setLocalDescription(offer);
       await supabase.from('call_signals').insert({
-        'room_id': w.roomId,
-        'sender_id': w.currentProfile.id,
+        'room_id': widget.roomId,
+        'sender_id': widget.currentProfile.id,
         'type': 'offer',
         'payload': {'sdp': offer.sdp, 'type': offer.type},
       });
     } else {
-      final existing = await supabase.from('call_signals').select().eq('room_id', w.roomId).order('created_at', ascending: true);
+      final existing = await supabase.from('call_signals').select().eq('room_id', widget.roomId).order('created_at', ascending: true);
       for (final row in (existing as List)) {
         await _handleSignalRow(row as Map);
       }
@@ -424,16 +418,15 @@ class _RandomCallScreenState extends State {
   }
 
   Future _handleSignalRow(Map row) async {
-    final w = widget as RandomCallScreen;
     final id = row['id']?.toString() ?? '';
     if (id.isNotEmpty && _processedIds.contains(id)) return;
     if (id.isNotEmpty) _processedIds.add(id);
-    if (row['sender_id'] == w.currentProfile.id) return;
+    if (row['sender_id'] == widget.currentProfile.id) return;
 
     final type = row['type'].toString();
     final data = row['payload'] as Map;
 
-    if (type == 'offer' && !w.isCaller && _pc != null) {
+    if (type == 'offer' && !widget.isCaller && _pc != null) {
       await _pc!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['type']));
       _remoteDescSet = true;
       for (final ice in _pendingRemoteIce) {
@@ -444,12 +437,12 @@ class _RandomCallScreenState extends State {
       final answer = await _pc!.createAnswer();
       await _pc!.setLocalDescription(answer);
       await supabase.from('call_signals').insert({
-        'room_id': w.roomId,
-        'sender_id': w.currentProfile.id,
+        'room_id': widget.roomId,
+        'sender_id': widget.currentProfile.id,
         'type': 'answer',
         'payload': {'sdp': answer.sdp, 'type': answer.type},
       });
-    } else if (type == 'answer' && w.isCaller && _pc != null) {
+    } else if (type == 'answer' && widget.isCaller && _pc != null) {
       await _pc!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['type']));
       _remoteDescSet = true;
       for (final ice in _pendingRemoteIce) {
@@ -478,11 +471,10 @@ class _RandomCallScreenState extends State {
   String _fmt(int s) => '${(s ~/ 60).toString().padLeft(2, '0')}:${(s % 60).toString().padLeft(2, '0')}';
 
   Future _hangUp() async {
-    final w = widget as RandomCallScreen;
     try {
       await supabase.from('call_signals').insert({
-        'room_id': w.roomId,
-        'sender_id': w.currentProfile.id,
+        'room_id': widget.roomId,
+        'sender_id': widget.currentProfile.id,
         'type': 'hangup',
         'payload': {},
       });
@@ -492,19 +484,18 @@ class _RandomCallScreenState extends State {
 
   @override
   Widget build(BuildContext context) {
-    final w = widget as RandomCallScreen;
     return Scaffold(
       backgroundColor: const Color(0xFF1A2421),
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         foregroundColor: Colors.white,
-        title: Text(w.partnerHandle),
+        title: Text(widget.partnerHandle),
       ),
       body: SafeArea(
         child: Column(
           children: [
             Expanded(
-              child: w.isVideo
+              child: widget.isVideo
                   ? Stack(
                       children: [
                         Positioned.fill(child: RTCVideoView(_remoteRenderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover)),
@@ -517,7 +508,7 @@ class _RandomCallScreenState extends State {
                         children: [
                           CircleAvatar(radius: 54, backgroundColor: Theme.of(context).colorScheme.primary, child: const Icon(Icons.person, size: 54, color: Colors.white)),
                           const SizedBox(height: 20),
-                          Text(w.partnerHandle, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                          Text(widget.partnerHandle, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 8),
                           Text(_isConnected ? 'Connected • ${_fmt(_seconds)}' : _statusText, style: const TextStyle(color: Colors.white70, fontSize: 16)),
                         ],
@@ -541,7 +532,7 @@ class _RandomCallScreenState extends State {
                       },
                     ),
                   ),
-                  if (w.isVideo)
+                  if (widget.isVideo)
                     CircleAvatar(
                       radius: 28,
                       backgroundColor: _isCameraOff ? Colors.white : Colors.white24,
