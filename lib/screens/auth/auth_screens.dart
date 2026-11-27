@@ -3,8 +3,32 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../models/app_models.dart';
 import '../../services/supabase_client.dart';
 
-class WelcomeScreen extends StatelessWidget {
+class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
+
+  @override
+  State<WelcomeScreen> createState() => _WelcomeScreenState();
+}
+
+class _WelcomeScreenState extends State<WelcomeScreen> {
+  bool _isGoogleLoading = false;
+
+  Future<void> _signInWithGoogle() async {
+    setState(() => _isGoogleLoading = true);
+    try {
+      await supabase.auth.signInWithOAuth(
+        OAuthProvider.google,
+        redirectTo: 'https://anscripta-wq.github.io/Parley/',
+      );
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isGoogleLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Google sign-in failed: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -25,9 +49,24 @@ class WelcomeScreen extends StatelessWidget {
                 width: double.infinity,
                 height: 52,
                 child: ElevatedButton.icon(
+                  icon: const Icon(Icons.g_mobiledata, size: 28),
+                  label: Text(
+                    _isGoogleLoading ? 'Connecting to Google...' : 'Continue with Google',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: _isGoogleLoading ? null : _signInWithGoogle,
+                ),
+              ),
+              const SizedBox(height: 14),
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: OutlinedButton.icon(
                   icon: const Icon(Icons.email_outlined),
                   label: const Text('Continue with Email', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                  onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmailAuthScreen())),
+                  onPressed: _isGoogleLoading
+                      ? null
+                      : () => Navigator.push(context, MaterialPageRoute(builder: (_) => const EmailAuthScreen())),
                 ),
               ),
             ],
