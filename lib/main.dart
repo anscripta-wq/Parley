@@ -233,11 +233,19 @@ class _MainScreenState extends State {
   Future _loadPosts() async {
     try {
       final rows = await supabase.from('posts').select().order('created_at', ascending: false);
-      final blockRows = await supabase.from('blocked_users').select('blocked_id').eq('blocker_id', _profile.id);
-      final blockedIds = (blockRows as List).map((r) => (r as Map)['blocked_id'].toString()).toSet();
-      final likeRows = await supabase.from('post_likes').select('post_id').eq('user_id', _profile.id);
-      final saveRows = await supabase.from('saved_posts').select('post_id').eq('user_id', _profile.id);
-      final commentRows = await supabase.from('post_comments').select('post_id');
+      List blockRows = [];
+      List likeRows = [];
+      List saveRows = [];
+      List commentRows = [];
+      final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+      final hasValidId = uuidRegex.hasMatch(_profile.id.trim());
+      if (hasValidId) {
+        try { blockRows = await supabase.from('blocked_users').select('blocked_id').eq('blocker_id', _profile.id); } catch (_) {}
+        try { likeRows = await supabase.from('post_likes').select('post_id').eq('user_id', _profile.id); } catch (_) {}
+        try { saveRows = await supabase.from('saved_posts').select('post_id').eq('user_id', _profile.id); } catch (_) {}
+      }
+      try { commentRows = await supabase.from('post_comments').select('post_id'); } catch (_) {}
+      final blockedIds = blockRows.map((r) => (r as Map)['blocked_id'].toString()).toSet();
 
       final likedIds = (likeRows as List).map((r) => (r as Map)['post_id'].toString()).toSet();
       final savedIds = (saveRows as List).map((r) => (r as Map)['post_id'].toString()).toSet();
