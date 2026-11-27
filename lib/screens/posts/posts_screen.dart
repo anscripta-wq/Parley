@@ -38,18 +38,30 @@ class _PostsScreenState extends State {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
 
+    final uuidRegex = RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$');
+    final rawId = w.currentProfile.id.trim();
+    final authId = supabase.auth.currentUser?.id ?? '';
+    final validUserId = uuidRegex.hasMatch(rawId)
+        ? rawId
+        : (uuidRegex.hasMatch(authId) ? authId : '00000000-0000-0000-0000-000000000000');
+
     try {
       await supabase.from('posts').insert({
-        'user_id': w.currentProfile.id,
-        'author_handle': w.currentProfile.handle,
+        'user_id': validUserId,
+        'author_handle': w.currentProfile.handle.isNotEmpty ? w.currentProfile.handle : 'Scholar',
         'content': trimmed,
         'likes_count': 0,
       });
       await w.onRefresh();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(backgroundColor: Colors.red, duration: const Duration(seconds: 6), content: Text('Post Error: $e')),
+        await showDialog(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Post Error'),
+            content: SelectableText('$e\n\nSent user_id: $validUserId'),
+            actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK'))],
+          ),
         );
       }
     }
